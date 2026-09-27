@@ -1,7 +1,8 @@
-"""avalon-release-notes: check-pr | build | render."""
+"""avalon-release-notes: check-pr | build | render | previous | upload | publish."""
 import argparse
 import json
 import os
+import urllib.error
 from pathlib import Path
 
 from avalon_release_notes.entry import build_entry, render_text
@@ -21,19 +22,73 @@ def _check_pr(args) -> int:
     return 1
 
 
-def _build(args) -> int:
+def store_from_env():
+    """The avalon-dist store (imported on use, so check-pr needs no boto3)."""
+    from avalon_release_notes.store import from_env
+
+    return from_env()
+
+
+def _make_entry(args, previous: str | None) -> dict:
     fetch = default_fetch(os.environ.get("GITHUB_TOKEN"))
     commit = resolve_sha(fetch, args.repo, args.commit)
-    prs = prs_in_range(fetch, args.repo, args.previous_commit, commit)
+    prs = prs_in_range(fetch, args.repo, previous, commit)
     # A private repository cannot make the note block a merge, so a note can be missing: say which.
     missing = [f"#{p.number}" for p in prs if not is_bot(p.author) and not player_note(p.body)]
     if missing:
         print(f"::warning title=Player note::no player note, the title is shown instead: {', '.join(missing)}")
-    entry = build_entry(product=args.product, channel=args.channel, version=args.version, build=args.build,
-                        commit=commit, published_at=args.published_at, release_url=args.release_url,
-                        prs=prs, public=args.public)
-    Path(args.out).write_text(json.dumps(entry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return build_entry(product=args.product, channel=args.channel, version=args.version, build=args.build,
+                       commit=commit, published_at=args.published_at, release_url=args.release_url,
+                       prs=prs, public=args.public)
+
+
+def _write(entry: dict, out: str | None, render_to: str | None) -> None:
+    if out:
+        Path(out).write_text(json.dumps(entry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if render_to:
+        Path(render_to).write_text(render_text(entry) + "\n", encoding="utf-8")
+
+
+def _build(args) -> int:
+    entry = _make_entry(args, args.previous_commit)
+    _write(entry, args.out, None)
     print(f"{len(entry['items'])} change(s) -> {args.out}")
+    return 0
+
+
+def _previous(args) -> int:
+    print((store_from_env().latest(args.product, args.channel) or {}).get("commit", ""))
+    return 0
+
+
+def _upload(args) -> int:
+    from avalon_release_notes.store import EntryConflict
+
+    try:
+        print(store_from_env().put(json.loads(Path(args.entry).read_text(encoding="utf-8"))))
+    except EntryConflict as e:
+        print(f"::error title=Changelog::{e}")
+        return 3
+    return 0
+
+
+def _publish(args) -> int:
+    from avalon_release_notes.store import EntryConflict
+
+    store = store_from_env()
+    previous = (store.latest(args.product, args.channel) or {}).get("commit")
+    try:
+        entry = _make_entry(args, previous)
+    except (urllib.error.URLError, OSError) as e:
+        print(f"::error title=Changelog::could not read the pull requests for {args.product} {args.version}: "
+              f"{e}; the release itself is published, re-run this step")
+        return 2
+    _write(entry, args.out, args.render_to)
+    try:
+        print(store.put(entry))
+    except EntryConflict as e:
+        print(f"::error title=Changelog::{e}")
+        return 3
     return 0
 
 
@@ -48,24 +103,39 @@ def main(argv: list[str] | None = None) -> int:
     check = sub.add_parser("check-pr", help="the PR description (env PR_BODY) has a player note")
     check.add_argument("--author", required=True)
     check.set_defaults(run=_check_pr)
+    def entry_args(p):
+        p.add_argument("--repo", required=True)
+        p.add_argument("--product", required=True, choices=["server", "client", "launcher"])
+        p.add_argument("--channel")
+        p.add_argument("--version", required=True)
+        p.add_argument("--build")
+        p.add_argument("--commit", required=True)
+        p.add_argument("--published-at", required=True)
+        p.add_argument("--release-url")
+        p.add_argument("--public", action="store_true")
+
     build = sub.add_parser("build", help="build a changelog entry from the PRs in a release range")
-    build.add_argument("--repo", required=True)
-    build.add_argument("--product", required=True, choices=["server", "client", "launcher"])
-    build.add_argument("--channel")
-    build.add_argument("--version", required=True)
-    build.add_argument("--build")
-    build.add_argument("--commit", required=True)
+    entry_args(build)
     build.add_argument("--previous-commit")
-    build.add_argument("--published-at", required=True)
-    build.add_argument("--release-url")
-    build.add_argument("--public", action="store_true")
     build.add_argument("--out", required=True)
     build.set_defaults(run=_build)
     render = sub.add_parser("render", help="print an entry as plain text (the client manifest's notes)")
     render.add_argument("--entry", required=True)
     render.set_defaults(run=_render)
+    publish = sub.add_parser("publish", help="build the entry since the previous one in avalon-dist, and upload it")
+    entry_args(publish)
+    publish.add_argument("--out")
+    publish.add_argument("--render-to")
+    publish.set_defaults(run=_publish)
+    previous = sub.add_parser("previous", help="print the commit of the newest entry in avalon-dist")
+    previous.add_argument("--product", required=True, choices=["server", "client", "launcher"])
+    previous.add_argument("--channel")
+    previous.set_defaults(run=_previous)
+    upload = sub.add_parser("upload", help="upload an entry to avalon-dist (entries are immutable)")
+    upload.add_argument("--entry", required=True)
+    upload.set_defaults(run=_upload)
     args = parser.parse_args(argv)
-    if args.command == "build":
+    if args.command in ("build", "publish"):
         # An entry is immutable once published, so a wrong key or a leaked link is refused up front.
         if (args.product == "client") != bool(args.channel):
             parser.error("--channel is required for the client and only for the client")

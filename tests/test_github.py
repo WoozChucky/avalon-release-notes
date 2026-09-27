@@ -59,3 +59,49 @@ def test_resolves_a_ref_to_its_full_sha():
 
     assert resolve_sha(fetch, "o/r", "v0.6.0") == "f" * 40
     assert calls == ["/repos/o/r/commits/v0.6.0"]
+
+
+class _Response:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self.body
+
+
+def test_default_fetch_sends_the_token_and_a_timeout(monkeypatch):
+    import urllib.request
+    from avalon_release_notes.github import default_fetch
+    seen = {}
+
+    def urlopen(request, timeout):
+        seen["auth"], seen["timeout"], seen["url"] = request.get_header("Authorization"), timeout, request.full_url
+        return _Response(b'{"sha": "x"}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert default_fetch("t0ken")("/repos/o/r/commits/main") == {"sha": "x"}
+    assert seen == {"auth": "Bearer t0ken", "timeout": 30, "url": "https://api.github.com/repos/o/r/commits/main"}
+
+
+def test_default_fetch_waits_once_when_rate_limited(monkeypatch):
+    import urllib.error
+    import urllib.request
+    from avalon_release_notes import github
+    calls, slept = [], []
+
+    def urlopen(request, timeout):
+        calls.append(1)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(request.full_url, 429, "slow down", {"Retry-After": "7"}, None)
+        return _Response(b"[]")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(github.time, "sleep", slept.append)
+    assert github.default_fetch(None)("/x") == []
+    assert slept == [7] and len(calls) == 2

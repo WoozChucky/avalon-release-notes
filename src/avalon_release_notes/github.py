@@ -1,5 +1,7 @@
 """The pull requests merged into main between two released commits (GitHub REST API)."""
 import json
+import time
+import urllib.error
 import urllib.request
 from typing import Any, Callable
 
@@ -15,6 +17,14 @@ def default_fetch(token: str | None) -> Fetch:
             "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
             **({"Authorization": f"Bearer {token}"} if token else {}),
         })
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as e:
+            # Rate limited: wait as told (at most a minute) and try once more; anything else is final.
+            if e.code not in (403, 429) or "Retry-After" not in (e.headers or {}):
+                raise
+            time.sleep(min(int(e.headers["Retry-After"]), 60))
         with urllib.request.urlopen(request, timeout=30) as response:
             return json.load(response)
     return fetch
