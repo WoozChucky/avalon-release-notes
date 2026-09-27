@@ -25,6 +25,10 @@ def _build(args) -> int:
     fetch = default_fetch(os.environ.get("GITHUB_TOKEN"))
     commit = resolve_sha(fetch, args.repo, args.commit)
     prs = prs_in_range(fetch, args.repo, args.previous_commit, commit)
+    # A private repository cannot make the note block a merge, so a note can be missing: say which.
+    missing = [f"#{p.number}" for p in prs if not is_bot(p.author) and not player_note(p.body)]
+    if missing:
+        print(f"::warning title=Player note::no player note, the title is shown instead: {', '.join(missing)}")
     entry = build_entry(product=args.product, channel=args.channel, version=args.version, build=args.build,
                         commit=commit, published_at=args.published_at, release_url=args.release_url,
                         prs=prs, public=args.public)
@@ -61,4 +65,10 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("--entry", required=True)
     render.set_defaults(run=_render)
     args = parser.parse_args(argv)
+    if args.command == "build":
+        # An entry is immutable once published, so a wrong key or a leaked link is refused up front.
+        if (args.product == "client") != bool(args.channel):
+            parser.error("--channel is required for the client and only for the client")
+        if args.public and args.product != "server":
+            parser.error("--public is only for the server (the other repositories are private)")
     return args.run(args)
