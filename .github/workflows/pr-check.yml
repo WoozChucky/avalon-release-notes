@@ -1,0 +1,19 @@
+name: PR check
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  pr-check:
+    name: Title and player note
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./pr-check
+        with:
+          title: ${{ github.event.pull_request.title }}
+          body: ${{ github.event.pull_request.body }}
+          author: ${{ github.event.pull_request.user.login }}

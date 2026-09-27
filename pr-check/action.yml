@@ -1,0 +1,29 @@
+name: Avalon PR check
+description: The pull request title follows Conventional Commits and the description has a player note.
+inputs:
+  title:
+    description: The pull request title
+    required: true
+  body:
+    description: The pull request description
+    required: false
+    default: ''
+  author:
+    description: The pull request author's login (bots need no player note)
+    required: true
+runs:
+  using: composite
+  steps:
+    # Untrusted text reaches the scripts only through the environment, never inside the script.
+    - name: Title follows Conventional Commits
+      shell: bash
+      env:
+        PR_TITLE: ${{ inputs.title }}
+      run: bash "$GITHUB_ACTION_PATH/../tools/pr-title-check.sh"
+    - name: Description has a player note
+      shell: bash
+      env:
+        PR_BODY: ${{ inputs.body }}
+        PR_AUTHOR: ${{ inputs.author }}
+        PYTHONPATH: ${{ github.action_path }}/../src
+      run: python3 -m avalon_release_notes check-pr --author "$PR_AUTHOR"
