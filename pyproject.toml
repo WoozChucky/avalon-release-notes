@@ -1,0 +1,9 @@
+[project]
+name = "avalon-release-notes"
+version = "1.0.0"
+requires-python = ">=3.11"
+description = "Avalon's PR conventions check and changelog builder"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
