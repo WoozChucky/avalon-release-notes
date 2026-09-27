@@ -16,10 +16,16 @@ The rule lives only in [`tools/pr-title-check.sh`](tools/pr-title-check.sh); its
 **Player note:** the description has a line
 
 ```
-Player note: <one plain sentence a player would understand>
+Player note: <one sentence, written like a patch note>
 ```
 
-- It says what a player will notice. For internal work, say what it means, e.g. "Faster builds; nothing changes in the game".
+- Write it the way patch notes read: third person, starting with what changed, never "I" or "we".
+  - "Fixed an issue where heals could raise health above the maximum."
+  - "Added browser sign-in to the launcher."
+  - "Increased the world server's connection limit."
+- For internal work, say so: "No gameplay changes: faster builds."
+- The check refuses a note written in the first person.
+
 - It is shown on the public changelog.
 - HTML comments don't count, so the template's hint alone fails the check.
 - Bots (`renovate[bot]`, `dependabot[bot]`, …) need no note.

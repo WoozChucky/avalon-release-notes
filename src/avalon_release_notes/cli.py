@@ -7,16 +7,24 @@ from pathlib import Path
 
 from avalon_release_notes.entry import build_entry, render_text
 from avalon_release_notes.github import default_fetch, prs_in_range, resolve_sha
-from avalon_release_notes.notes import is_bot, player_note
+from avalon_release_notes.notes import first_person, is_bot, player_note
 
 HINT = (
-    "The pull request description needs a line `Player note: <one plain sentence>` saying what a player "
-    "would notice (for internal work, what it means, e.g. \"Faster builds; nothing changes in the game\")."
+    "The pull request description needs a line `Player note: <one sentence>`, written like a patch note: "
+    "third person, starting with what changed. Examples: \"Fixed an issue where heals could raise health "
+    "above the maximum.\", \"Added browser sign-in to the launcher.\", \"Increased the world server's "
+    "connection limit.\" For internal work: \"No gameplay changes: faster builds.\""
 )
 
 
 def _check_pr(args) -> int:
-    if is_bot(args.author) or player_note(os.environ.get("PR_BODY")):
+    if is_bot(args.author):
+        return 0
+    note = player_note(os.environ.get("PR_BODY"))
+    if note and first_person(note):
+        print(f"::error title=Player note::Write the player note as a patch note, not in the first person. {HINT}")
+        return 1
+    if note:
         return 0
     print(f"::error title=Player note::{HINT}")
     return 1

@@ -38,3 +38,14 @@ def test_the_first_note_wins():
 def test_bots():
     assert is_bot("renovate[bot]") and is_bot("dependabot[bot]")
     assert not is_bot("WoozChucky") and not is_bot(None)
+
+
+def test_first_person_is_spotted():
+    from avalon_release_notes.notes import first_person
+    for note in ("I fixed the heals.", "We now cap health.", "Fixed my mistake in the loot table.",
+                 "Our servers restart faster.", "Heals no longer confuse us.", "I've added a launcher setting."):
+        assert first_person(note), note
+    for note in ("Fixed an issue where heals could raise health above the maximum.",
+                 "Added browser sign-in to the launcher.", "The US realm list loads faster.",
+                 "Improved world server start-up time.", "No gameplay changes: CI now checks pull request titles."):
+        assert not first_person(note), note

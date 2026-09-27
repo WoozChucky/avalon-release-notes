@@ -13,5 +13,14 @@ def player_note(body: str | None) -> str | None:
     return text or None
 
 
+# Patch notes speak about the game, not the author: "Fixed an issue where…", never "I fixed…".
+# "us" and "me" only in lower case, so "the US realm" is not first person.
+_FIRST_PERSON = re.compile(r"\b(?:I|I'm|I've|I'd|I'll|us|me)\b|\b(?i:we|we're|we've|we'll|we'd|our|ours|my|mine)\b")
+
+
+def first_person(note: str) -> bool:
+    return bool(_FIRST_PERSON.search(note))
+
+
 def is_bot(login: str | None) -> bool:
     return (login or "").endswith("[bot]")
