@@ -1,6 +1,6 @@
 # avalon-release-notes
 
-The pull request conventions every Avalon repository follows, and the tool that turns merged pull requests into the public changelog (homelab spec `docs/superpowers/specs/2026-09-27-avalon-changelog-design.md`).
+The pull request conventions every Avalon repository follows, and the tool that turns merged pull requests into the public changelog.
 
 ## The conventions
 
