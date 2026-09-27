@@ -16,10 +16,16 @@ The rule lives only in [`tools/pr-title-check.sh`](tools/pr-title-check.sh); its
 **Player note:** the description has a line
 
 ```
-Player note: <one plain sentence a player would understand>
+Player note: <one sentence, written like a patch note>
 ```
 
-- It says what a player will notice. For internal work, say what it means, e.g. "Faster builds; nothing changes in the game".
+- Write it the way patch notes read: third person, starting with what changed, never "I" or "we".
+  - "Fixed an issue where heals could raise health above the maximum."
+  - "Added browser sign-in to the launcher."
+  - "Increased the world server's connection limit."
+- For internal work, say so: "No gameplay changes: faster builds."
+- The check refuses a note written in the first person.
+
 - It is shown on the public changelog.
 - HTML comments don't count, so the template's hint alone fails the check.
 - Bots (`renovate[bot]`, `dependabot[bot]`, …) need no note.
@@ -77,6 +83,19 @@ GITHUB_TOKEN=… PYTHONPATH=src python -m avalon_release_notes build --repo Wooz
 
 - The item text is the player note. Without one (a bot, or a PR from before the rollout), the text is the title without its `type(scope):` prefix.
 - `render --entry entry.json` prints the plain text the game client's manifest carries as its notes.
+
+## Publishing (release jobs)
+
+Install the package with the S3 extra from a tag: `pip install "avalon-release-notes[s3] @ git+https://github.com/WoozChucky/avalon-release-notes@v0.2.0"`. It needs:
+- `DIST_S3_ENDPOINT`, `DIST_S3_ACCESS_KEY` and `DIST_S3_SECRET_KEY` (and optionally `DIST_S3_BUCKET`, default `avalon-dist`);
+- `GITHUB_TOKEN` with `pull-requests: read`.
+
+The commands:
+- `publish` takes the `build` arguments minus `--previous-commit`. It finds the newest entry for the product (and channel) in `avalon-dist`, builds the entry since that commit and uploads it to `changelog/…`. It writes `--out` and `--render-to` if given, and prints the key.
+- `previous --product P [--channel C]` prints that commit.
+- `upload --entry FILE` uploads an entry built earlier with `build`.
+
+Entries are immutable: uploading the same entry again is fine, and a different one under an existing key is refused. If the GitHub API fails, `publish` stops before writing and says to re-run; the release itself is already out.
 
 ## Development
 

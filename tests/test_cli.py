@@ -15,14 +15,15 @@ def test_check_pr_fails_without_a_note(monkeypatch, capsys):
     assert "::error" in capsys.readouterr().out
 
 
+def test_check_pr_refuses_a_first_person_note(monkeypatch, capsys):
+    monkeypatch.setenv("PR_BODY", "Player note: I fixed the heals.")
+    assert main(["check-pr", "--author", "WoozChucky"]) == 1
+    assert "patch note" in capsys.readouterr().out.lower()
+
+
 def test_bots_need_no_note(monkeypatch):
     monkeypatch.setenv("PR_BODY", "")
     assert main(["check-pr", "--author", "renovate[bot]"]) == 0
-import json
-
-from avalon_release_notes import cli
-
-
 def test_build_and_render(monkeypatch, tmp_path, capsys):
     from avalon_release_notes.entry import PullRequest
     monkeypatch.setattr(cli, "resolve_sha", lambda fetch, repo, ref: "s" * 40)
@@ -68,3 +69,92 @@ def test_build_names_the_prs_that_fell_back_to_their_title(monkeypatch, tmp_path
                      "--published-at", "t", "--out", str(tmp_path / "e.json")]) == 0
     out = capsys.readouterr().out
     assert "#3" in out and "#4" not in out and "#5" not in out
+
+
+def _seeded_store(entries):
+    import boto3
+    from moto import mock_aws
+
+    from avalon_release_notes.store import Store
+    mock = mock_aws()
+    mock.start()
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="avalon-dist")
+    store = Store(s3, "avalon-dist")
+    for e in entries:
+        store.put(e)
+    return store, mock
+
+
+def _entry(**over):
+    e = {"schema": 1, "product": "server", "channel": None, "version": "0.6.0", "build": None, "commit": "p" * 40,
+         "publishedAt": "2026-09-27T14:00:00Z", "releaseUrl": None, "items": []}
+    e.update(over)
+    return e
+
+
+def test_previous_prints_the_newest_commit(monkeypatch, capsys):
+    store, mock = _seeded_store([_entry()])
+    try:
+        monkeypatch.setattr(cli, "store_from_env", lambda: store)
+        assert cli.main(["previous", "--product", "server"]) == 0
+        assert capsys.readouterr().out.strip() == "p" * 40
+        assert cli.main(["previous", "--product", "launcher"]) == 0
+        assert capsys.readouterr().out.strip() == ""
+    finally:
+        mock.stop()
+
+
+def test_upload_refuses_a_different_entry(monkeypatch, tmp_path, capsys):
+    store, mock = _seeded_store([_entry()])
+    try:
+        monkeypatch.setattr(cli, "store_from_env", lambda: store)
+        f = tmp_path / "e.json"
+        f.write_text(json.dumps(_entry(items=[{"kind": "fixed", "text": "x", "breaking": False}])), encoding="utf-8")
+        assert cli.main(["upload", "--entry", str(f)]) == 3
+        assert "::error" in capsys.readouterr().out
+    finally:
+        mock.stop()
+
+
+def test_publish_uses_the_previous_entry_and_uploads(monkeypatch, tmp_path, capsys):
+    from avalon_release_notes.entry import PullRequest
+    store, mock = _seeded_store([_entry()])
+    try:
+        monkeypatch.setattr(cli, "store_from_env", lambda: store)
+        monkeypatch.setattr(cli, "resolve_sha", lambda fetch, repo, ref: "h" * 40)
+        seen = {}
+
+        def prs(fetch, repo, prev, head):
+            seen["prev"] = prev
+            return [PullRequest(9, "fix: a", "Player note: Fixed a thing.", "WoozChucky", "2026-09-28T12:00:00Z", "u")]
+
+        monkeypatch.setattr(cli, "prs_in_range", prs)
+        notes = tmp_path / "notes.txt"
+        assert cli.main(["publish", "--repo", "WoozChucky/Avalon.Server", "--product", "server", "--version", "0.7.0",
+                         "--commit", "v0.7.0", "--published-at", "2026-09-28T13:00:00Z", "--public",
+                         "--render-to", str(notes)]) == 0
+        assert seen["prev"] == "p" * 40
+        assert store.latest("server", None)["version"] == "0.7.0"
+        assert notes.read_text(encoding="utf-8").strip() == "Fixed:\n- Fixed a thing."
+    finally:
+        mock.stop()
+
+
+def test_publish_reports_github_errors_plainly(monkeypatch, capsys):
+    import urllib.error
+    store, mock = _seeded_store([])
+    try:
+        monkeypatch.setattr(cli, "store_from_env", lambda: store)
+
+        def refused(fetch, repo, ref):
+            raise urllib.error.HTTPError("https://api.github.com/x", 403, "rate limited", {}, None)
+
+        monkeypatch.setattr(cli, "resolve_sha", refused)
+        assert cli.main(["publish", "--repo", "o/r", "--product", "launcher", "--version", "0.1.2",
+                         "--commit", "h", "--published-at", "t"]) == 2
+        out = capsys.readouterr().out
+        assert "::error" in out and "launcher 0.1.2" in out
+    finally:
+        mock.stop()
+
