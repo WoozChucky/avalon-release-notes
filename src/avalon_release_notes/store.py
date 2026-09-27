@@ -6,7 +6,11 @@ from botocore.exceptions import ClientError
 
 
 class EntryConflict(RuntimeError):
-    pass
+    """The key holds an entry for another commit: entries are immutable."""
+
+
+class AlreadyPublished(EntryConflict):
+    """The key already holds this release's entry (same commit): a re-run, nothing to write."""
 
 
 def entry_key(product: str, channel: str | None, version: str, build: str | None) -> str:
@@ -44,15 +48,21 @@ class Store:
                     newest = entry
         return newest
 
+    def get(self, key: str) -> dict | None:
+        body = self._read(key)
+        return None if body is None else json.loads(body)
+
     def put(self, entry: dict) -> str:
         key = entry_key(entry["product"], entry["channel"], entry["version"], entry["build"])
-        body = _encode(entry)
-        existing = self._read(key)
-        if existing is not None and json.loads(existing) != entry:
-            raise EntryConflict(f"{key} already holds a different entry; entries are immutable")
+        existing = self.get(key)
         if existing is None:
-            self.client.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType="application/json")
-        return key
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=_encode(entry), ContentType="application/json")
+            return key
+        if existing == entry:
+            return key
+        if existing.get("commit") == entry.get("commit"):
+            raise AlreadyPublished(f"{key} is already published for this commit")
+        raise EntryConflict(f"{key} already holds the entry of another commit; entries are immutable")
 
 
 def from_env() -> Store:

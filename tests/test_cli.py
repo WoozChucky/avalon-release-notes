@@ -110,7 +110,8 @@ def test_upload_refuses_a_different_entry(monkeypatch, tmp_path, capsys):
     try:
         monkeypatch.setattr(cli, "store_from_env", lambda: store)
         f = tmp_path / "e.json"
-        f.write_text(json.dumps(_entry(items=[{"kind": "fixed", "text": "x", "breaking": False}])), encoding="utf-8")
+        # Another commit under the same key: a real conflict (the same commit would be a re-run).
+        f.write_text(json.dumps(_entry(commit="q" * 40)), encoding="utf-8")
         assert cli.main(["upload", "--entry", str(f)]) == 3
         assert "::error" in capsys.readouterr().out
     finally:
@@ -158,3 +159,46 @@ def test_publish_reports_github_errors_plainly(monkeypatch, capsys):
     finally:
         mock.stop()
 
+
+
+def test_publish_twice_for_the_same_commit_says_already_published(monkeypatch, capsys):
+    from avalon_release_notes.entry import PullRequest
+    store, mock = _seeded_store([_entry()])
+    try:
+        monkeypatch.setattr(cli, "store_from_env", lambda: store)
+        monkeypatch.setattr(cli, "resolve_sha", lambda fetch, repo, ref: "h" * 40)
+        monkeypatch.setattr(cli, "prs_in_range", lambda fetch, repo, prev, head: [
+            PullRequest(9, "fix: a", "Player note: Fixed a thing.", "WoozChucky", "2026-09-28T12:00:00Z", "u")])
+        args = ["publish", "--repo", "o/r", "--product", "server", "--version", "0.7.0", "--commit", "v0.7.0",
+                "--published-at", "2026-09-28T13:00:00Z", "--public"]
+        assert cli.main(args) == 0
+        args[-2] = "2026-09-28T14:00:00Z"  # a re-run later: another time, same release
+        assert cli.main(args) == 0
+        assert "already published" in capsys.readouterr().out
+        assert store.latest("server", None)["publishedAt"] == "2026-09-28T13:00:00Z"
+    finally:
+        mock.stop()
+
+
+def test_upload_of_a_rebuilt_entry_for_the_same_commit_is_already_published(monkeypatch, tmp_path, capsys):
+    store, mock = _seeded_store([_entry()])
+    try:
+        monkeypatch.setattr(cli, "store_from_env", lambda: store)
+        f = tmp_path / "e.json"
+        f.write_text(json.dumps(_entry(publishedAt="2026-09-28T00:00:00Z")), encoding="utf-8")
+        assert cli.main(["upload", "--entry", str(f)]) == 0
+        assert "already published" in capsys.readouterr().out
+    finally:
+        mock.stop()
+
+
+def test_build_writes_the_rendered_notes_as_utf8(monkeypatch, tmp_path):
+    from avalon_release_notes.entry import PullRequest
+    monkeypatch.setattr(cli, "resolve_sha", lambda fetch, repo, ref: "s" * 40)
+    monkeypatch.setattr(cli, "prs_in_range", lambda fetch, repo, prev, head: [
+        PullRequest(1, "fix: a", "Player note: Fixed the café sign — it’s readable now.", "WoozChucky",
+                    "2026-09-27T12:00:00Z", "u")])
+    notes = tmp_path / "notes.md"
+    assert cli.main(["build", "--repo", "o/r", "--product", "launcher", "--version", "0.1.0", "--commit", "h",
+                     "--published-at", "t", "--out", str(tmp_path / "e.json"), "--render-to", str(notes)]) == 0
+    assert notes.read_bytes().decode("utf-8") == "Fixed:\n- Fixed the café sign — it’s readable now.\n"

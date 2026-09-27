@@ -52,14 +52,15 @@ def _make_entry(args, previous: str | None) -> dict:
 
 def _write(entry: dict, out: str | None, render_to: str | None) -> None:
     if out:
-        Path(out).write_text(json.dumps(entry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        Path(out).write_text(json.dumps(entry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     if render_to:
-        Path(render_to).write_text(render_text(entry) + "\n", encoding="utf-8")
+        Path(render_to).write_text(render_text(entry) + "\n", encoding="utf-8", newline="\n")
 
 
 def _build(args) -> int:
     entry = _make_entry(args, args.previous_commit)
-    _write(entry, args.out, None)
+    # The notes file is written here, as UTF-8: piping the text through a Windows shell would re-encode it.
+    _write(entry, args.out, args.render_to)
     print(f"{len(entry['items'])} change(s) -> {args.out}")
     return 0
 
@@ -70,10 +71,13 @@ def _previous(args) -> int:
 
 
 def _upload(args) -> int:
-    from avalon_release_notes.store import EntryConflict
+    from avalon_release_notes.store import AlreadyPublished, EntryConflict
 
     try:
         print(store_from_env().put(json.loads(Path(args.entry).read_text(encoding="utf-8"))))
+    except AlreadyPublished as e:
+        print(e)
+        return 0
     except EntryConflict as e:
         print(f"::error title=Changelog::{e}")
         return 3
@@ -81,19 +85,28 @@ def _upload(args) -> int:
 
 
 def _publish(args) -> int:
-    from avalon_release_notes.store import EntryConflict
+    from avalon_release_notes.store import AlreadyPublished, EntryConflict, entry_key
 
     store = store_from_env()
-    previous = (store.latest(args.product, args.channel) or {}).get("commit")
     try:
+        commit = resolve_sha(default_fetch(os.environ.get("GITHUB_TOKEN")), args.repo, args.commit)
+        # A re-run of this release: its entry is there already, for this commit.
+        existing = store.get(entry_key(args.product, args.channel, args.version, args.build))
+        if existing is not None and existing.get("commit") == commit:
+            print(f"{args.product} {args.version} is already published")
+            return 0
+        previous = (store.latest(args.product, args.channel) or {}).get("commit")
+        args.commit = commit
         entry = _make_entry(args, previous)
     except (urllib.error.URLError, OSError) as e:
         print(f"::error title=Changelog::could not read the pull requests for {args.product} {args.version}: "
-              f"{e}; the release itself is published, re-run this step")
+              f"{e}; the release itself is published, re-run the failed job")
         return 2
     _write(entry, args.out, args.render_to)
     try:
         print(store.put(entry))
+    except AlreadyPublished as e:
+        print(e)
     except EntryConflict as e:
         print(f"::error title=Changelog::{e}")
         return 3
@@ -126,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     entry_args(build)
     build.add_argument("--previous-commit")
     build.add_argument("--out", required=True)
+    build.add_argument("--render-to")
     build.set_defaults(run=_build)
     render = sub.add_parser("render", help="print an entry as plain text (the client manifest's notes)")
     render.add_argument("--entry", required=True)
