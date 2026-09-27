@@ -49,3 +49,13 @@ def test_first_person_is_spotted():
                  "Added browser sign-in to the launcher.", "The US realm list loads faster.",
                  "Improved world server start-up time.", "No gameplay changes: CI now checks pull request titles."):
         assert not first_person(note), note
+
+
+def test_patch_note_words_that_look_like_first_person_are_fine():
+    from avalon_release_notes.notes import first_person
+    for note in ("Improved disk I/O during loading.", "Fixed Rank I of Frostbolt dealing no damage.",
+                 "Added a new gold mine to Elwynn Forest.", 'Fixed a typo in "My Account".',
+                 "Tier I talents now unlock at level 10."):
+        assert not first_person(note), note
+    assert first_person("I improved disk I/O.")
+

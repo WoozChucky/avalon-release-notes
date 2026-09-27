@@ -95,7 +95,7 @@ The commands:
 - `previous --product P [--channel C]` prints that commit.
 - `upload --entry FILE` uploads an entry built earlier with `build`.
 
-Entries are immutable: uploading the same entry again is fine, and a different one under an existing key is refused. If the GitHub API fails, `publish` stops before writing and says to re-run; the release itself is already out.
+Entries are immutable. Running `publish` or `upload` again for the same release (the same commit) reports it as already published and exits successfully, so re-running a failed job is safe. An entry for a *different* commit under an existing key is refused. `build --render-to FILE` writes the notes as UTF-8 with LF line endings; don't pipe them through a Windows shell. If the GitHub API fails, `publish` stops before writing and says to re-run the failed job; the release itself is already out.
 
 ## Development
 
