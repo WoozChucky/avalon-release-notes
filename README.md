@@ -23,6 +23,7 @@ Player note: <one plain sentence a player would understand>
 - It is shown on the public changelog.
 - HTML comments don't count, so the template's hint alone fails the check.
 - Bots (`renovate[bot]`, `dependabot[bot]`, …) need no note.
+- The check blocks merging where branch protection is available (the public repositories: Avalon.Server and this one). In the private repositories it is a red check, not a block. `build` then warns which pull requests had no note, and shows their titles instead.
 
 ## Checking pull requests
 
