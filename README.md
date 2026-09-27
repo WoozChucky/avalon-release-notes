@@ -39,14 +39,14 @@ jobs:
     name: Title and player note
     runs-on: ubuntu-latest
     steps:
-      - uses: WoozChucky/avalon-release-notes/pr-check@v1
+      - uses: WoozChucky/avalon-release-notes/pr-check@v0.1.0
         with:
           title: ${{ github.event.pull_request.title }}
           body: ${{ github.event.pull_request.body }}
           author: ${{ github.event.pull_request.user.login }}
 ```
 
-The title and body reach the scripts only through environment variables.
+The title and body reach the scripts only through environment variables. Pin an exact release tag (Avalon versions stay 0.x until the game's 1.0); Renovate proposes updates.
 
 Use [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) as the template.
 
