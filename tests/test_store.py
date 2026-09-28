@@ -50,3 +50,19 @@ def test_refuses_to_overwrite_a_different_entry(store):
     store.put(entry())
     with pytest.raises(EntryConflict):
         store.put(entry(items=[{"kind": "fixed", "text": "x", "breaking": False}]))
+
+
+def test_server_channel_keys():
+    assert entry_key("server", "dev", "0.7.1-dev.412", None) == "changelog/server/dev/0.7.1-dev.412.json"
+    assert entry_key("server", "ptr", "0.7.1-nightly.412", None) == "changelog/server/ptr/0.7.1-nightly.412.json"
+    assert entry_key("server", None, "0.7.0", None) == "changelog/server/0.7.0.json"
+
+
+def test_live_server_previous_ignores_dev_and_ptr_entries(store):
+    # S3 lists changelog/server/ recursively: the dev and ptr entries are under it too.
+    store.put(entry(version="0.7.0", commit="l" * 40, at="2026-09-28T10:00:00Z"))
+    store.put(entry(channel="dev", version="0.7.1-dev.5", commit="d" * 40, at="2026-09-28T12:00:00Z"))
+    store.put(entry(channel="ptr", version="0.7.1-nightly.5", commit="p" * 40, at="2026-09-28T13:00:00Z"))
+    assert store.latest("server", None)["commit"] == "l" * 40
+    assert store.latest("server", "dev")["commit"] == "d" * 40
+    assert store.latest("server", "ptr")["commit"] == "p" * 40

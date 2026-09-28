@@ -159,8 +159,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command in ("build", "publish"):
         # An entry is immutable once published, so a wrong key or a leaked link is refused up front.
-        if (args.product == "client") != bool(args.channel):
-            parser.error("--channel is required for the client and only for the client")
+        if args.product == "client" and not args.channel:
+            parser.error("--channel is required for the client")
+        if args.product == "launcher" and args.channel:
+            parser.error("--channel is not for the launcher")
+        if args.product == "server" and args.channel not in (None, "dev", "ptr"):
+            parser.error("the server's --channel is dev or ptr; a release (live) has none")
         if args.public and args.product != "server":
             parser.error("--public is only for the server (the other repositories are private)")
     return args.run(args)

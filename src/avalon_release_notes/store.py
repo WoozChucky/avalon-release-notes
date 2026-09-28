@@ -1,4 +1,4 @@
-"""Changelog entries in avalon-dist: one immutable JSON object per release (spec section 4)."""
+"""Changelog entries in avalon-dist: one immutable JSON object per release or channel build."""
 import json
 import os
 
@@ -16,11 +16,17 @@ class AlreadyPublished(EntryConflict):
 def entry_key(product: str, channel: str | None, version: str, build: str | None) -> str:
     if product == "client":
         return f"changelog/client/{channel}/{build}.json"
+    if product == "server" and channel:
+        return f"changelog/server/{channel}/{version}.json"
     return f"changelog/{product}/{version}.json"
 
 
 def _prefix(product: str, channel: str | None) -> str:
-    return f"changelog/client/{channel}/" if product == "client" else f"changelog/{product}/"
+    if product == "client":
+        return f"changelog/client/{channel}/"
+    if product == "server" and channel:
+        return f"changelog/server/{channel}/"
+    return f"changelog/{product}/"
 
 
 def _encode(entry: dict) -> bytes:
@@ -44,6 +50,8 @@ class Store:
         for page in self.client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=_prefix(product, channel)):
             for obj in page.get("Contents", []):
                 entry = json.loads(self._read(obj["Key"]))
+                if entry.get("channel") != channel:
+                    continue
                 if newest is None or entry["publishedAt"] > newest["publishedAt"]:
                     newest = entry
         return newest
