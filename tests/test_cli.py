@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from avalon_release_notes import cli
 from avalon_release_notes.cli import main
 
@@ -48,9 +50,8 @@ def _build_args(*extra):
 
 
 def test_build_refuses_flags_that_do_not_fit_the_product(capsys):
-    import pytest
     for extra in (["--product", "client"],                                  # a client entry needs its channel
-                  ["--product", "server", "--channel", "ptr"],               # only the client has channels
+                  ["--product", "launcher", "--channel", "dev"],             # launcher doesn't have channels
                   ["--product", "launcher", "--public"],                     # only the server is public
                   ["--product", "client", "--channel", "ptr", "--public"]):
         with pytest.raises(SystemExit) as exit_:
@@ -202,3 +203,21 @@ def test_build_writes_the_rendered_notes_as_utf8(monkeypatch, tmp_path):
     assert cli.main(["build", "--repo", "o/r", "--product", "launcher", "--version", "0.1.0", "--commit", "h",
                      "--published-at", "t", "--out", str(tmp_path / "e.json"), "--render-to", str(notes)]) == 0
     assert notes.read_bytes().decode("utf-8") == "Fixed:\n- Fixed the café sign — it’s readable now.\n"
+
+
+@pytest.mark.parametrize("product,channel", [("server", "live"), ("server", "beta"), ("launcher", "dev")])
+def test_channels_that_do_not_fit_the_product_are_refused(product, channel, capsys):
+    with pytest.raises(SystemExit) as e:
+        main(["build", "--repo", "WoozChucky/Avalon.Server", "--product", product, "--channel", channel,
+              "--version", "0.7.1", "--commit", "c" * 40, "--published-at", "2026-09-28T02:00:00Z", "--out", "x.json"])
+    assert e.value.code == 2
+
+
+def test_server_dev_build_is_accepted(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "resolve_sha", lambda fetch, repo, ref: "s" * 40)
+    monkeypatch.setattr(cli, "prs_in_range", lambda fetch, repo, prev, head: [])
+    out = tmp_path / "entry.json"
+    assert main(["build", "--repo", "WoozChucky/Avalon.Server", "--product", "server", "--channel", "dev",
+                 "--version", "0.7.1-dev.412", "--commit", "c" * 40, "--published-at", "2026-09-28T02:00:00Z",
+                 "--public", "--out", str(out)]) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["channel"] == "dev"
