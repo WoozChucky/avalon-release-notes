@@ -6,6 +6,7 @@ import urllib.error
 from pathlib import Path
 
 from avalon_release_notes.entry import build_entry, render_text
+from avalon_release_notes.gamelinks import DEFAULT_API, api_lookup, links, malformed
 from avalon_release_notes.github import default_fetch, prs_in_range, resolve_sha
 from avalon_release_notes.notes import first_person, is_bot, player_note
 
@@ -16,6 +17,8 @@ HINT = (
     "connection limit.\" For internal work: \"No gameplay changes: faster builds.\""
 )
 
+MAX_LOOKUPS = 10
+
 
 def _check_pr(args) -> int:
     if is_bot(args.author):
@@ -25,9 +28,40 @@ def _check_pr(args) -> int:
         print(f"::error title=Player note::Write the player note as a patch note, not in the first person. {HINT}")
         return 1
     if note:
-        return 0
+        return _check_links(note)
     print(f"::error title=Player note::{HINT}")
     return 1
+
+
+def _check_links(note: str) -> int:
+    bad = malformed(note)
+    for raw in bad:
+        print(f'::error title=Player note::Malformed game link "{raw}". '
+              "Use [item:ID] or [ability:ID], optionally [item:ID@WORLD].")
+    if bad:
+        return 1
+    found = list(dict.fromkeys((k.kind, k.id, k.world) for k in links(note)))
+    if not found:
+        return 0
+    lookup = api_lookup(os.environ.get("AVALON_API_URL") or DEFAULT_API)
+    for n, (kind, id, world) in enumerate(found):
+        if n >= MAX_LOOKUPS:
+            print(f"::notice title=Player note::Could not verify game links: {len(found) - n} more than "
+                  f"{MAX_LOOKUPS} were not checked.")
+            break
+        try:
+            name = lookup(kind, id, world)
+        except Exception as e:  # noqa: BLE001 - only a malformed token fails the check
+            print(f"::notice title=Player note::Could not verify game links: {e}")
+            break
+        if name is None:
+            where = world if world is not None else getattr(lookup, "default_world", lambda: None)()
+            print(f"::warning title=Player note::{kind} {id} is not on "
+                  f"{'world ' + str(where) if where is not None else 'the default world'} "
+                  "(fine if this PR adds it).")
+        else:
+            print(f"{kind}:{id} → {name}")
+    return 0
 
 
 def store_from_env():
@@ -47,7 +81,9 @@ def _make_entry(args, previous: str | None) -> dict:
         print(f"::warning title=Player note::no player note, the title is shown instead: {', '.join(missing)}")
     return build_entry(product=args.product, channel=args.channel, version=args.version, build=args.build,
                        commit=commit, published_at=args.published_at, release_url=args.release_url,
-                       prs=prs, public=args.public)
+                       prs=prs, public=args.public,
+                       lookup=api_lookup(os.environ.get("AVALON_API_URL") or DEFAULT_API),
+                       warn=lambda w: print(f"::warning title=Changelog::{w}"))
 
 
 def _write(entry: dict, out: str | None, render_to: str | None) -> None:

@@ -221,3 +221,86 @@ def test_server_dev_build_is_accepted(monkeypatch, tmp_path):
                  "--version", "0.7.1-dev.412", "--commit", "c" * 40, "--published-at", "2026-09-28T02:00:00Z",
                  "--public", "--out", str(out)]) == 0
     assert json.loads(out.read_text(encoding="utf-8"))["channel"] == "dev"
+
+
+def _check(monkeypatch, body, lookup=None):
+    calls = []
+
+    def fake(kind, id, world):
+        calls.append((kind, id, world))
+        if isinstance(lookup, Exception):
+            raise lookup
+        return lookup(kind, id, world) if lookup else None
+
+    fake.default_world = lambda: 2
+    monkeypatch.setenv("PR_BODY", body)
+    monkeypatch.setattr(cli, "api_lookup", lambda base, timeout=5.0: fake)
+    return calls
+
+
+def test_check_pr_errors_on_a_malformed_game_link(monkeypatch, capsys):
+    calls = _check(monkeypatch, "Player note: Fixed [Item:14].")
+    assert main(["check-pr", "--author", "WoozChucky"]) == 1
+    assert ('::error title=Player note::Malformed game link "[Item:14]". '
+            'Use [item:ID] or [ability:ID], optionally [item:ID@WORLD].') in capsys.readouterr().out
+    assert calls == []
+
+
+def test_check_pr_warns_on_a_missing_item(monkeypatch, capsys):
+    _check(monkeypatch, "Player note: Fixed [item:14].")
+    assert main(["check-pr", "--author", "WoozChucky"]) == 0
+    assert "::warning title=Player note::item 14 is not on world 2 (fine if this PR adds it)." in capsys.readouterr().out
+
+
+def test_check_pr_names_the_world_in_the_warning(monkeypatch, capsys):
+    _check(monkeypatch, "Player note: Fixed [item:14@2].")
+    assert main(["check-pr", "--author", "WoozChucky"]) == 0
+    assert "::warning title=Player note::item 14 is not on world 2 (fine if this PR adds it)." in capsys.readouterr().out
+
+
+def test_check_pr_prints_the_found_name(monkeypatch, capsys):
+    _check(monkeypatch, "Player note: Fixed [item:14].", lambda k, i, w: "Barkplate Helm")
+    assert main(["check-pr", "--author", "WoozChucky"]) == 0
+    assert "item:14 → Barkplate Helm" in capsys.readouterr().out
+
+
+def test_check_pr_only_notices_a_lookup_error(monkeypatch, capsys):
+    _check(monkeypatch, "Player note: Fixed [item:14].", OSError("timed out"))
+    assert main(["check-pr", "--author", "WoozChucky"]) == 0
+    assert "::notice title=Player note::Could not verify game links: timed out" in capsys.readouterr().out
+
+
+def test_check_pr_without_tokens_makes_no_lookups(monkeypatch, capsys):
+    calls = _check(monkeypatch, "Player note: Faster builds [item 14].")
+    assert main(["check-pr", "--author", "WoozChucky"]) == 0
+    assert calls == [] and capsys.readouterr().out == ""
+
+
+def test_check_pr_caps_lookups_with_a_notice(monkeypatch, capsys):
+    calls = _check(monkeypatch, "Player note: Fixed " + " ".join(f"[item:{n}]" for n in range(1, 13)) + ".",
+                   lambda k, i, w: "N")
+    assert main(["check-pr", "--author", "WoozChucky"]) == 0
+    assert len(calls) == 10
+    assert "::notice title=Player note::Could not verify game links: 2 more" in capsys.readouterr().out
+
+
+def test_check_pr_uses_the_api_url_env(monkeypatch):
+    seen = []
+    monkeypatch.setenv("PR_BODY", "Player note: Fixed [item:14].")
+    monkeypatch.setenv("AVALON_API_URL", "http://x/api")
+    monkeypatch.setattr(cli, "api_lookup", lambda base, timeout=5.0: seen.append(base) or (lambda k, i, w: "N"))
+    assert main(["check-pr", "--author", "WoozChucky"]) == 0
+    assert seen == ["http://x/api"]
+
+
+def test_build_freezes_names_and_warns(monkeypatch, tmp_path, capsys):
+    from avalon_release_notes.entry import PullRequest
+    monkeypatch.setattr(cli, "resolve_sha", lambda fetch, repo, ref: "s" * 40)
+    monkeypatch.setattr(cli, "prs_in_range", lambda fetch, repo, prev, head: [
+        PullRequest(1, "feat: a", "Player note: Added [item:14] and [item:15].", "WoozChucky",
+                    "2026-09-27T12:00:00Z", "https://gh/pull/1")])
+    monkeypatch.setattr(cli, "api_lookup", lambda base, timeout=5.0: lambda k, i, w: "Helm" if i == 14 else None)
+    out = tmp_path / "entry.json"
+    assert cli.main(_build_args("--product", "server", "--out", str(out))) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["items"][0]["text"] == "Added [item:14|Helm] and [item:15]."
+    assert "::warning title=Changelog::" in capsys.readouterr().out
