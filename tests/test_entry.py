@@ -51,3 +51,26 @@ def test_render_text_without_player_facing_changes():
     assert render_text(e) == "No player-facing changes.\nAlso: 1 internal change"
     empty = dict(e, items=[])
     assert render_text(empty) == "No player-facing changes."
+
+
+def test_make_item_resolves_the_note_through_the_lookup():
+    item = make_item(pr(1, "feat: a", "Player note: Added [item:14]."), public=False,
+                     lookup=lambda kind, id, world: "Barkplate Helm")
+    assert item["text"] == "Added [item:14|Barkplate Helm]."
+
+
+def test_make_item_without_a_lookup_resolves_nothing():
+    assert make_item(pr(1, "feat: a", "Player note: Added [item:14]."), public=False)["text"] == "Added [item:14]."
+
+
+def test_build_entry_threads_the_lookup_and_warnings():
+    warnings = []
+    entry = build_entry(product="server", channel=None, version="1", build=None, commit="c", published_at="t",
+                        release_url=None, prs=[pr(1, "feat: a", "Player note: Added [item:14].")], public=False,
+                        lookup=lambda k, i, w: None, warn=warnings.append)
+    assert entry["items"][0]["text"] == "Added [item:14]." and len(warnings) == 1
+
+
+def test_render_text_prints_plain_names():
+    entry = {"items": [{"kind": "new", "text": "Added [item:14|Barkplate Helm] and [ability:2].", "breaking": False}]}
+    assert render_text(entry) == "New:\n- Added Barkplate Helm and ability #2."

@@ -57,6 +57,24 @@ The title and body reach the scripts only through environment variables. Pin an 
 
 Use [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) as the template.
 
+## Game links
+
+A player note can link items and abilities with a token:
+
+- `[item:14]` or `[ability:210]` uses the default public world.
+- `[item:14@3]` names the world.
+- `[item:14|Barkplate Helm]` carries the name (`[item:14@3|Barkplate Helm]` both). `kind` is lower case; ids and worlds are 1 to 9 digits.
+- Anything shaped like a token that doesn't match exactly, such as `[Item:14]`, `[item:abc]` or `[item:14@x]`, is malformed. `[item 14]` doesn't look like a token and is ignored.
+
+What `check-pr` does with them (the optional `api-url` input, env `AVALON_API_URL`, overrides the public API base, default `https://avalon.nunolevezinho.xyz/api`; each request has a 5 s timeout and at most 10 are made per note):
+
+- A malformed token is an error and fails the check. This is the only failure.
+- A token found in the API prints `item:14 → Barkplate Helm`.
+- A token the API doesn't have (404) is a warning: it may be added by this PR.
+- Any other failure, no default world, or more than 10 tokens is a notice: the links could not be verified.
+
+At release time (`build` and `publish`) each token without a name is looked up and its name is frozen into the entry, `[item:14]` becoming `[item:14|Barkplate Helm]`, so a later rename doesn't rewrite history. A token that is already named is kept without a lookup; one that can't be resolved stays as written, with a `::warning title=Changelog::` and the build still succeeds. The plain text (`render`, `--render-to`) shows the name, or `item #14` when there is none; a malformed look-alike stays as written.
+
 ## Changelog entries
 
 `build` collects the pull requests merged into `main` between the previous release's commit and this one, and writes one entry:
