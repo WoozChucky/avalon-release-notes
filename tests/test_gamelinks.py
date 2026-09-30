@@ -22,8 +22,8 @@ def test_non_tokens_are_not_links(text):
 
 
 def test_malformed_lists_lookalikes_that_are_not_tokens():
-    # The plan also expects "[itme:14]" here, but its look-alike regex cannot match a misspelt kind; see the report.
-    assert malformed("[itme:14] [Item:2] [item:14]") == ["[Item:2]"]
+    assert malformed("[itme:14] [Item:2] [item:14]") == ["[itme:14]", "[Item:2]"]
+    assert malformed("[note: see below] [x:y] [item 14] [a:1b]") == ["[a:1b]"]
     assert malformed("[item:abc] [item:14@x] [ABILITY:3|x] [item 14] [item:14|n]") == [
         "[item:abc]", "[item:14@x]", "[ABILITY:3|x]"]
 

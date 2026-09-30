@@ -8,7 +8,8 @@ from typing import Callable
 
 DEFAULT_API = "https://avalon.nunolevezinho.xyz/api"
 TOKEN = re.compile(r"\[(item|ability):(\d{1,9})(?:@(\d{1,9}))?(?:\|([^\]\n]+))?\]")
-LOOKALIKE = re.compile(r"\[(?:item|ability):[^\]\n]*\]", re.IGNORECASE)
+KIND_LOOKALIKE = re.compile(r"\[(?:item|ability):[^\]\n]*\]", re.IGNORECASE)  # a known kind, anything after
+LOOKALIKE = re.compile(r"\[[A-Za-z]+:\d[^\]\n]*\]")  # any word, then a digit: catches misspelt kinds
 
 # (kind, id, world) -> name, None when the API says 404; raises on any other failure.
 Lookup = Callable[[str, int, int | None], str | None]
@@ -33,7 +34,9 @@ def links(text: str) -> list[Link]:
 
 
 def malformed(text: str) -> list[str]:
-    return [m.group(0) for m in LOOKALIKE.finditer(text) if not TOKEN.fullmatch(m.group(0))]
+    """Look-alikes (either pattern, deduplicated, in order) that aren't tokens, as written."""
+    found = {m.span(): m.group(0) for p in (KIND_LOOKALIKE, LOOKALIKE) for m in p.finditer(text)}
+    return [raw for _, raw in sorted(found.items()) if not TOKEN.fullmatch(raw)]
 
 
 def plain(text: str) -> str:
