@@ -9,6 +9,7 @@ from avalon_release_notes.entry import PullRequest
 
 Fetch = Callable[[str], Any]
 PAGE = 100
+ATTEMPTS = 3   # asks per request: a server error is retried twice
 
 
 def default_fetch(token: str | None) -> Fetch:
@@ -17,16 +18,24 @@ def default_fetch(token: str | None) -> Fetch:
             "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
             **({"Authorization": f"Bearer {token}"} if token else {}),
         })
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as e:
-            # Rate limited: wait as told (at most a minute) and try once more; anything else is final.
-            if e.code not in (403, 429) or "Retry-After" not in (e.headers or {}):
+        rate_limited = False
+        for attempt in range(ATTEMPTS):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    return json.load(response)
+            except urllib.error.HTTPError as e:
+                last = attempt == ATTEMPTS - 1
+                # A server error is GitHub's, and passes on a later ask: wait 2 s, then 4 s.
+                if e.code >= 500 and not last:
+                    time.sleep(2 * 2 ** attempt)
+                    continue
+                # Rate limited: wait as told (at most a minute) and try once more; anything else is final.
+                if e.code in (403, 429) and "Retry-After" in (e.headers or {}) and not rate_limited and not last:
+                    rate_limited = True
+                    time.sleep(min(int(e.headers["Retry-After"]), 60))
+                    continue
                 raise
-            time.sleep(min(int(e.headers["Retry-After"]), 60))
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.load(response)
+        raise AssertionError("unreachable: the last attempt returns or raises")
     return fetch
 
 
