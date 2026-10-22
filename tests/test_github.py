@@ -105,3 +105,61 @@ def test_default_fetch_waits_once_when_rate_limited(monkeypatch):
     monkeypatch.setattr(github.time, "sleep", slept.append)
     assert github.default_fetch(None)("/x") == []
     assert slept == [7] and len(calls) == 2
+
+
+def test_default_fetch_retries_a_server_error(monkeypatch):
+    import urllib.error
+    import urllib.request
+    from avalon_release_notes import github
+    calls, slept = [], []
+
+    def urlopen(request, timeout):
+        calls.append(1)
+        if len(calls) < 3:
+            raise urllib.error.HTTPError(request.full_url, 500, "Internal Server Error", {}, None)
+        return _Response(b"[]")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(github.time, "sleep", slept.append)
+    assert github.default_fetch(None)("/x") == []
+    assert slept == [2, 4] and len(calls) == 3
+
+
+def test_default_fetch_gives_up_after_three_server_errors(monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    import pytest
+
+    from avalon_release_notes import github
+    calls, slept = [], []
+
+    def urlopen(request, timeout):
+        calls.append(1)
+        raise urllib.error.HTTPError(request.full_url, 502, "Bad Gateway", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(github.time, "sleep", slept.append)
+    with pytest.raises(urllib.error.HTTPError):
+        github.default_fetch(None)("/x")
+    assert slept == [2, 4] and len(calls) == 3
+
+
+def test_default_fetch_does_not_retry_a_client_error(monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    import pytest
+
+    from avalon_release_notes import github
+    calls = []
+
+    def urlopen(request, timeout):
+        calls.append(1)
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(github.time, "sleep", lambda s: None)
+    with pytest.raises(urllib.error.HTTPError):
+        github.default_fetch(None)("/x")
+    assert len(calls) == 1
